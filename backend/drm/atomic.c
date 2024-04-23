@@ -322,6 +322,7 @@ static bool atomic_crtc_commit(struct wlr_drm_connector *conn,
 
 	struct atomic atom;
 	atomic_begin(&atom);
+	if (conn->props.crtc_id)
 	atomic_add(&atom, conn->id, conn->props.crtc_id, active ? crtc->id : 0);
 	if (modeset && active && conn->props.link_status != 0) {
 		atomic_add(&atom, conn->id, conn->props.link_status,
