@@ -20,6 +20,8 @@ struct wlr_box;
 struct wlr_fbox;
 
 struct wlr_renderer_impl {
+	bool (*bind_wl_display)(struct wlr_renderer *renderer,
+		struct wl_display *wl_display);
 	bool (*bind_buffer)(struct wlr_renderer *renderer,
 		struct wlr_buffer *buffer);
 	bool (*begin)(struct wlr_renderer *renderer, uint32_t width,

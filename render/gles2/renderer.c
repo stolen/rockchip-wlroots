@@ -14,6 +14,7 @@
 #include <wlr/render/interface.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_matrix.h>
+#include <wlr/types/wlr_egl_buffer.h>
 #include <wlr/util/box.h>
 #include <wlr/util/log.h>
 #include "render/egl.h"
@@ -646,8 +647,15 @@ static void gles2_render_timer_destroy(struct wlr_render_timer *wlr_timer) {
 	free(timer);
 }
 
+static bool gles2_bind_wl_display(struct wlr_renderer *wlr_renderer,
+				  struct wl_display *wl_display) {
+	struct wlr_gles2_renderer *renderer = gles2_get_renderer(wlr_renderer);
+	return wlr_egl_bind_wl_display(renderer->egl, wl_display);
+}
+
 static const struct wlr_renderer_impl renderer_impl = {
 	.destroy = gles2_destroy,
+	.bind_wl_display = gles2_bind_wl_display,
 	.bind_buffer = gles2_bind_buffer,
 	.begin = gles2_begin,
 	.end = gles2_end,
