@@ -219,6 +219,12 @@ bool wlr_renderer_read_pixels(struct wlr_renderer *r, uint32_t fmt,
 
 bool wlr_renderer_init_wl_shm(struct wlr_renderer *r,
 		struct wl_display *wl_display) {
+	// The sway would call us directly instead of wlr_renderer_init_wl_display
+	if (r->impl->bind_wl_display &&
+	    !r->impl->bind_wl_display(r, wl_display)) {
+		return false;
+	}
+
 	return wlr_shm_create_with_renderer(wl_display, 1, r) != NULL;
 }
 

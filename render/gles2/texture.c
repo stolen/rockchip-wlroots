@@ -10,6 +10,7 @@
 #include <wlr/render/interface.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/types/wlr_matrix.h>
+#include <wlr/types/wlr_egl_buffer.h>
 #include <wlr/util/log.h>
 #include "render/egl.h"
 #include "render/gles2.h"
@@ -308,6 +309,51 @@ static struct wlr_texture *gles2_texture_from_dmabuf(
 	return &texture->wlr_texture;
 }
 
+static struct wlr_texture *gles2_texture_from_eglbuf(
+		struct wlr_renderer *wlr_renderer,
+		struct wlr_egl_buffer *buffer) {
+	struct wlr_gles2_renderer *renderer = gles2_get_renderer(wlr_renderer);
+	EGLImageKHR image = wlr_egl_create_image_from_eglbuf(renderer->egl, buffer);
+	if (image == EGL_NO_IMAGE_KHR) {
+		wlr_log(WLR_ERROR, "Failed to create EGL image from wl_buffer resource");
+		return NULL;
+	}
+
+	if (!renderer->procs.glEGLImageTargetTexture2DOES) {
+		return NULL;
+	}
+
+	struct wlr_gles2_texture *texture =
+		gles2_texture_create(renderer, buffer->base.width, buffer->base.height);
+	if (texture == NULL) {
+		return NULL;
+	}
+	texture->drm_format = DRM_FORMAT_INVALID; // texture can't be written anyways
+
+	struct wlr_egl_context prev_ctx;
+	wlr_egl_save_context(&prev_ctx);
+	wlr_egl_make_current(renderer->egl);
+
+	texture->has_alpha = buffer->has_alpha;
+	texture->image = image;
+	texture->target = GL_TEXTURE_EXTERNAL_OES;
+
+	push_gles2_debug(renderer);
+
+	glGenTextures(1, &texture->tex);
+	glBindTexture(texture->target, texture->tex);
+	glTexParameteri(texture->target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(texture->target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	renderer->procs.glEGLImageTargetTexture2DOES(texture->target, texture->image);
+	glBindTexture(texture->target, 0);
+
+	pop_gles2_debug(renderer);
+
+	wlr_egl_restore_context(&prev_ctx);
+
+	return &texture->wlr_texture;
+}
+
 static void texture_handle_buffer_destroy(struct wlr_addon *addon) {
 	struct wlr_gles2_texture *texture =
 		wl_container_of(addon, texture, buffer_addon);
@@ -349,6 +395,36 @@ static struct wlr_texture *gles2_texture_from_dmabuf_buffer(
 	return &texture->wlr_texture;
 }
 
+static struct wlr_texture *gles2_texture_from_eglbuf_buffer(
+		struct wlr_gles2_renderer *renderer, struct wlr_buffer *buffer,
+		struct wlr_egl_buffer *eglbuf) {
+	struct wlr_addon *addon =
+		wlr_addon_find(&buffer->addons, renderer, &texture_addon_impl);
+	if (addon != NULL) {
+		struct wlr_gles2_texture *texture =
+			wl_container_of(addon, texture, buffer_addon);
+		if (!gles2_texture_invalidate(texture)) {
+			wlr_log(WLR_ERROR, "Failed to invalidate texture");
+			return false;
+		}
+		wlr_buffer_lock(texture->buffer);
+		return &texture->wlr_texture;
+	}
+
+	struct wlr_texture *wlr_texture =
+		gles2_texture_from_eglbuf(&renderer->wlr_renderer, eglbuf);
+	if (wlr_texture == NULL) {
+		return false;
+	}
+
+	struct wlr_gles2_texture *texture = gles2_get_texture(wlr_texture);
+	texture->buffer = wlr_buffer_lock(buffer);
+	wlr_addon_init(&texture->buffer_addon, &buffer->addons,
+		renderer, &texture_addon_impl);
+
+	return &texture->wlr_texture;
+}
+
 struct wlr_texture *gles2_texture_from_buffer(struct wlr_renderer *wlr_renderer,
 		struct wlr_buffer *buffer) {
 	struct wlr_gles2_renderer *renderer = gles2_get_renderer(wlr_renderer);
@@ -357,8 +433,11 @@ struct wlr_texture *gles2_texture_from_buffer(struct wlr_renderer *wlr_renderer,
 	uint32_t format;
 	size_t stride;
 	struct wlr_dmabuf_attributes dmabuf;
+	struct wlr_egl_buffer *eglbuf;
 	if (wlr_buffer_get_dmabuf(buffer, &dmabuf)) {
 		return gles2_texture_from_dmabuf_buffer(renderer, buffer, &dmabuf);
+	} else if ((eglbuf = wlr_buffer_to_egl(buffer))) {
+		return gles2_texture_from_eglbuf_buffer(renderer, buffer, eglbuf);
 	} else if (wlr_buffer_begin_data_ptr_access(buffer,
 			WLR_BUFFER_DATA_PTR_ACCESS_READ, &data, &format, &stride)) {
 		struct wlr_texture *tex = gles2_texture_from_pixels(wlr_renderer,
