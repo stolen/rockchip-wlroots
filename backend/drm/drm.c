@@ -397,6 +397,7 @@ void finish_drm_resources(struct wlr_drm_backend *drm) {
 		struct wlr_drm_plane *plane = &drm->planes[i];
 		drm_plane_finish_surface(plane);
 		wlr_drm_format_set_finish(&plane->formats);
+		free(plane->cursor_sizes);
 	}
 
 	free(drm->planes);
@@ -608,6 +609,7 @@ static bool drm_commit(struct wlr_drm_backend *drm,
 		if (page_flip == NULL) {
 			return false;
 		}
+		page_flip->async = (flags & DRM_MODE_PAGE_FLIP_ASYNC);
 	}
 
 	bool ok = drm->iface->commit(drm, state, page_flip, flags, test_only);
@@ -2023,6 +2025,12 @@ static void handle_page_flip(int fd, unsigned seq,
 	if (conn != NULL) {
 		conn->pending_page_flip = NULL;
 	}
+
+	uint32_t present_flags = WLR_OUTPUT_PRESENT_HW_CLOCK | WLR_OUTPUT_PRESENT_HW_COMPLETION;
+	if (!page_flip->async) {
+		present_flags |= WLR_OUTPUT_PRESENT_VSYNC;
+	}
+
 	if (page_flip->connectors_len == 0) {
 		drm_page_flip_destroy(page_flip);
 	}
@@ -2053,8 +2061,6 @@ static void handle_page_flip(int fd, unsigned seq,
 		drm_fb_move(&layer->current_fb, &layer->queued_fb);
 	}
 
-	uint32_t present_flags = WLR_OUTPUT_PRESENT_VSYNC |
-		WLR_OUTPUT_PRESENT_HW_CLOCK | WLR_OUTPUT_PRESENT_HW_COMPLETION;
 	/* Don't report ZERO_COPY in multi-gpu situations, because we had to copy
 	 * data between the GPUs, even if we were using the direct scanout
 	 * interface.
